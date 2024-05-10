@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::{self, Read},
     sync::{Arc, Mutex},
 };
 
@@ -12,6 +11,7 @@ use axum::{
     routing::{get, post},
     Json, RequestExt, Router,
 };
+use serde::Serialize;
 
 mod backend;
 mod state;
@@ -24,9 +24,6 @@ async fn main() {
     let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
 
     axum::serve(listener, app(cmd_state.clone())).await.unwrap();
-
-    // This is for terminal code
-    terminal_f();
 }
 
 fn app(cmd_state: CmdState) -> Router {
@@ -49,6 +46,18 @@ struct GetCmdStatus {
     cmd_id: u64,
 }
 
+#[derive(Serialize)]
+struct CmdResponse {
+    state: String,
+    output: String,
+}
+impl CmdResponse {
+    fn empty() -> Self {
+        let state = String::new();
+        let output = String::new();
+        Self { state, output }
+    }
+}
 // Struct to meet `post` requirements and
 // expecting json payload
 struct JsonPayload<T>(T);
@@ -85,58 +94,28 @@ async fn submitcmd(
 ) -> Response {
     let shell = req.shell;
     let cmd = req.cmd;
-    backend::init(shell, cmd, state)
-        .await
-        .to_string()
-        .into_response()
+    match backend::init(shell, cmd, state).await {
+        Ok(r) => r.to_string().into_response(),
+        Err(err) => err.to_string().into_response(),
+    }
 }
 
 async fn getcmdstatus(
     Path(GetCmdStatus { cmd_id }): Path<GetCmdStatus>,
     State(state): State<CmdState>,
-) -> Response {
+) -> Json<CmdResponse> {
     let cmd_unwrap = state.lock().unwrap();
-    let cmd_status = cmd_unwrap.get(&cmd_id).unwrap();
-    String::from_utf8(cmd_status.output.clone())
-        .unwrap()
-        .into_response()
+    match cmd_unwrap.get(&cmd_id) {
+        Some(v) => {
+            let mut c_res = CmdResponse::empty();
+            c_res.state = v.state.clone();
+            c_res.output = String::from_utf8(v.output.clone()).unwrap();
+            Json(c_res)
+        }
+        None => Json(CmdResponse::empty()),
+    }
 }
 
 async fn pitch() -> Response {
     "This is Runit application".into_response()
-}
-
-async fn terminal_f() {
-    let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
-    loop {
-        let mut shell = String::new();
-        let mut script = String::new();
-        let cmd_state = cmd_state.clone();
-
-        println!("Choose a Shell: bash or powershell");
-        match io::stdin().read_line(&mut shell) {
-            Ok(_) => {}
-            Err(_) => {
-                println!("Something went wrong reading input, lets try again..");
-                continue;
-            }
-        };
-        println!("Enter the command to run");
-        match io::stdin().read_line(&mut script) {
-            Ok(_) => {}
-            Err(_) => {
-                println!("Something went wrong reading input, lets try again..");
-                continue;
-            }
-        };
-
-        tokio::spawn(async move {
-            backend::init(
-                shell.trim().to_string(),
-                script.trim().to_string(),
-                cmd_state,
-            )
-            .await;
-        });
-    }
 }
