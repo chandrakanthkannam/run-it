@@ -1,73 +1,59 @@
-use std::{
-    collections::hash_map::DefaultHasher,
-    error::Error,
-    hash::{Hash, Hasher},
-    io::{self, Read},
-    process::{Child, ChildStderr, ChildStdout, Command, Stdio},
-    str::FromStr,
-    time::{self, Duration, SystemTime},
-};
-
-use tokio::time::sleep;
-
 use crate::{
     state::{self, CommandInfo},
     CmdState,
 };
+use std::{
+    collections::hash_map::DefaultHasher,
+    error::Error,
+    hash::{Hash, Hasher},
+    io::{self},
+    process::Stdio,
+    time::{self, Duration, SystemTime},
+};
+use tokio::{
+    io::AsyncReadExt,
+    process::{Child, ChildStderr, ChildStdout, Command},
+    time::sleep,
+};
 type HashId = u64;
 
 #[derive(Debug)]
-enum SupportedShells {
-    Bash,
-    PowerShell,
-}
-
-impl FromStr for SupportedShells {
-    type Err = SupportedShellsError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "bash" => Ok(Self::Bash),
-            "powershell" => Ok(Self::PowerShell),
-            _ => Err(SupportedShellsError {}),
-        }
-    }
-}
-
-struct SupportedShellsError {}
-
-#[derive(Debug)]
 struct Cmd {
-    shell: SupportedShells,
-    script: String,
+    cmd: String,
+    is_shell: bool,
 }
 
 impl Hash for Cmd {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.script.hash(state);
+        self.cmd.hash(state);
         time::SystemTime::now().hash(state);
     }
 }
 
 impl Cmd {
-    fn new(shell: SupportedShells, script: String) -> Self {
-        Self { shell, script }
+    fn new(cmd: String, is_shell: bool) -> Self {
+        Self { cmd, is_shell }
     }
-
+    fn runit_with_args(&self, args: String) -> io::Result<Child> {
+        Command::new(&self.cmd)
+            .arg(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
     fn runit(&self) -> io::Result<Child> {
-        match &self.shell {
-            SupportedShells::Bash => Command::new("bash")
-                .arg("-c")
-                .arg(&self.script)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn(),
-            SupportedShells::PowerShell => Command::new("powershell")
-                .arg(&self.script)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn(),
-        }
+        Command::new(&self.cmd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
+    fn runit_with_shell(&self, args: String) -> io::Result<Child> {
+        Command::new(&self.cmd)
+            .arg("-c")
+            .arg(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
     }
 }
 
@@ -83,12 +69,13 @@ async fn cmd_capture_output(
 
     loop {
         println!("Atempting to read..");
-        match c_stdout.read(&mut c_output) {
+        match c_stdout.read(&mut c_output).await {
             Ok(0) => {
                 println!("Nothing to read...");
                 cmd_info.state = "Completed".to_string();
                 // check if stderr has a anything
-                match c_stderr.read(&mut c_output) {
+                match c_stderr.read(&mut c_output).await {
+                    Ok(0) => (),
                     Ok(n) => {
                         cmd_info.state = "Failed".to_string();
                         println!("Reading: {} bytes", n);
@@ -111,8 +98,6 @@ async fn cmd_capture_output(
         // get a mutex lock
         let mut cmd_state = cmd_state.lock().unwrap();
         cmd_state.insert(cmd_hash, cmd_info.clone());
-
-        std::thread::sleep(Duration::new(5, 0));
     }
 
     // lets insert output again at the end here
@@ -148,7 +133,7 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
         );
         // timeout and kill the command if continues to run long
         if SystemTime::now().duration_since(start_time).unwrap() > Duration::new(50, 0) {
-            match c.kill() {
+            match c.kill().await {
                 Ok(_) => {
                     println!("Killing it....");
                 }
@@ -158,34 +143,31 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
             }
             break;
         }
-        sleep(Duration::new(10, 0)).await;
+        sleep(Duration::from_secs(10)).await;
     }
 }
 
 pub async fn init(
-    shell: String,
-    script: String,
+    cmd: String,
+    args: Option<String>,
+    is_shell: bool,
     cmd_state: CmdState,
 ) -> Result<HashId, Box<dyn Error>> {
-    let supported_shell = match SupportedShells::from_str(&shell.to_lowercase()[..]) {
-        Ok(supported_shell) => supported_shell,
-        Err(_) => panic!("Unsupported shell"),
-    };
     let mut hasher = DefaultHasher::new();
-    let new_command = Cmd::new(supported_shell, script);
+    let new_command = Cmd::new(cmd, is_shell);
     new_command.hash(&mut hasher);
-
-    let c_proc = new_command.runit()?;
+    let c_proc = match args {
+        Some(args) => {
+            if new_command.is_shell {
+                new_command.runit_with_shell(args.clone())?
+            } else {
+                new_command.runit_with_args(args.clone())?
+            }
+        }
+        None => new_command.runit()?,
+    };
     let cmd_hasher = hasher.finish();
 
-    tokio::spawn(async move {
-        watch_cmd(
-            c_proc,
-            cmd_state.clone(),
-            new_command.script.clone(),
-            cmd_hasher,
-        )
-        .await
-    });
+    tokio::spawn(async move { watch_cmd(c_proc, cmd_state, new_command.cmd, cmd_hasher).await });
     Ok(hasher.finish())
 }

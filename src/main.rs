@@ -37,8 +37,9 @@ fn app(cmd_state: CmdState) -> Router {
 // Serialize and Deserialize json payload
 #[derive(serde::Deserialize, Debug)]
 struct SubmitCmd {
-    shell: String,
     cmd: String,
+    args: Option<String>,
+    is_shell: Option<bool>,
 }
 
 #[derive(serde::Deserialize)]
@@ -92,9 +93,10 @@ async fn submitcmd(
     State(state): State<CmdState>,
     JsonPayload(req): JsonPayload<SubmitCmd>, // order of extractors matter: https://docs.rs/axum/latest/axum/extract/index.html#the-order-of-extractors
 ) -> Response {
-    let shell = req.shell;
     let cmd = req.cmd;
-    match backend::init(shell, cmd, state).await {
+    let args = req.args;
+    let is_shell = req.is_shell.unwrap_or(false);
+    match backend::init(cmd, args, is_shell, state).await {
         Ok(r) => r.to_string().into_response(),
         Err(err) => err.to_string().into_response(),
     }
