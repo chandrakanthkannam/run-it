@@ -15,6 +15,7 @@ use tokio::{
     process::{Child, ChildStderr, ChildStdout, Command},
     time::sleep,
 };
+use tracing::{debug, error, info, info_span, warn, Instrument};
 type HashId = u64;
 
 #[derive(Debug)]
@@ -68,31 +69,31 @@ async fn cmd_capture_output(
     let mut c_output = [0u8; 1024];
 
     loop {
-        println!("Atempting to read..");
+        debug!("Atempting to read..");
         match c_stdout.read(&mut c_output).await {
             Ok(0) => {
-                println!("Nothing to read...");
+                debug!("Nothing to read...");
                 cmd_info.state = "Completed".to_string();
                 // check if stderr has a anything
                 match c_stderr.read(&mut c_output).await {
                     Ok(0) => (),
                     Ok(n) => {
                         cmd_info.state = "Failed".to_string();
-                        println!("Reading: {} bytes", n);
+                        error!("Command failed, Reading: {} bytes", n);
                         cmd_info.output.append(&mut c_output[0..n].into());
                     }
                     Err(_) => {
-                        println!("Failed writting to buffer");
+                        error!("Failed writting to buffer");
                     }
                 }
                 break;
             }
             Ok(n) => {
-                println!("Reading: {} bytes", n);
+                info!("Reading: {} bytes", n);
                 cmd_info.output.append(&mut c_output[0..n].into());
             }
             Err(_) => {
-                println!("Failed writting to buffer");
+                error!("Failed writting to buffer");
             }
         }
         // get a mutex lock
@@ -100,6 +101,7 @@ async fn cmd_capture_output(
         cmd_state.insert(cmd_hash, cmd_info.clone());
     }
 
+    info!("Completed...");
     // lets insert output again at the end here
     let mut cmd_state = cmd_state.lock().unwrap();
     cmd_state.insert(cmd_hash, cmd_info.clone());
@@ -107,7 +109,7 @@ async fn cmd_capture_output(
 }
 
 async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: HashId) {
-    println!("Watching cmd now....");
+    debug!("Watching cmd now....");
     let c_stdout = c.stdout.take().unwrap();
     let c_stderr = c.stderr.take().unwrap();
     // recording start time, which is used to decide on timeout for the command
@@ -123,11 +125,13 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
     );
 
     tokio::spawn(async move {
-        cmd_capture_output(c_stdout, c_stderr, cmd_state, cmd_hash, cmd_info).await
+        cmd_capture_output(c_stdout, c_stderr, cmd_state, cmd_hash, cmd_info)
+            .instrument(info_span!("", cmd_hash))
+            .await
     });
 
     while c.try_wait().unwrap().take().is_none() {
-        println!(
+        debug!(
             "Wating for command to exit...:{:?}",
             SystemTime::now().duration_since(start_time).unwrap()
         );
@@ -135,10 +139,10 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
         if SystemTime::now().duration_since(start_time).unwrap() > Duration::new(50, 0) {
             match c.kill().await {
                 Ok(_) => {
-                    println!("Killing it....");
+                    warn!("Killing it....");
                 }
                 Err(err) => {
-                    println!("Cloudn't kill it, might have completed already..: {}", err);
+                    error!("Cloudn't kill it, might have completed already..: {}", err);
                 }
             }
             break;
@@ -166,8 +170,12 @@ pub async fn init(
         }
         None => new_command.runit()?,
     };
-    let cmd_hasher = hasher.finish();
+    let cmd_hash = hasher.finish();
 
-    tokio::spawn(async move { watch_cmd(c_proc, cmd_state, new_command.cmd, cmd_hasher).await });
+    tokio::spawn(async move {
+        watch_cmd(c_proc, cmd_state, new_command.cmd, cmd_hash)
+            .instrument(info_span!("", cmd_hash))
+            .await
+    });
     Ok(hasher.finish())
 }
