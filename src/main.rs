@@ -12,6 +12,9 @@ use axum::{
     Json, RequestExt, Router,
 };
 use serde::Serialize;
+use tracing::{self, info, warn};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod backend;
 mod state;
@@ -20,9 +23,19 @@ type CmdState = Arc<Mutex<HashMap<u64, state::CommandInfo>>>;
 
 #[tokio::main]
 async fn main() {
+    // init fmt tracing layer
+    let fmt_layer = fmt::layer().with_target(false);
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .init();
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
-
+    info!("Listening on {}", "0.0.0.0:3000");
     axum::serve(listener, app(cmd_state.clone())).await.unwrap();
 }
 
@@ -96,6 +109,7 @@ async fn submitcmd(
     let cmd = req.cmd;
     let args = req.args;
     let is_shell = req.is_shell.unwrap_or(false);
+    info!(method = "POST", cmd, args, is_shell);
     match backend::init(cmd, args, is_shell, state).await {
         Ok(r) => r.to_string().into_response(),
         Err(err) => err.to_string().into_response(),
@@ -107,6 +121,7 @@ async fn getcmdstatus(
     State(state): State<CmdState>,
 ) -> Json<CmdResponse> {
     let cmd_unwrap = state.lock().unwrap();
+    info!(method = "GET", cmd_id);
     match cmd_unwrap.get(&cmd_id) {
         Some(v) => {
             let mut c_res = CmdResponse::empty();
@@ -114,7 +129,10 @@ async fn getcmdstatus(
             c_res.output = String::from_utf8(v.output.clone()).unwrap();
             Json(c_res)
         }
-        None => Json(CmdResponse::empty()),
+        None => {
+            warn!("Not found: {}", cmd_id);
+            Json(CmdResponse::empty())
+        }
     }
 }
 
