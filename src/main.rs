@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    env,
+    net::{Ipv4Addr, SocketAddrV4},
     sync::{Arc, Mutex},
 };
 
@@ -33,9 +35,15 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    // port represent app name but in reverse: ITRUN on keypad
+    let port: u16 = match env::var("RUN_IT_PORT") {
+        Ok(c) => c.parse().unwrap_or(48786),
+        Err(_) => 48786,
+    };
+    let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), port);
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
-    info!("Listening on {}", "0.0.0.0:3000");
+    info!("Listening on {}", addr);
     axum::serve(listener, app(cmd_state.clone())).await.unwrap();
 }
 

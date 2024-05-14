@@ -4,9 +4,10 @@ use crate::{
 };
 use std::{
     collections::hash_map::DefaultHasher,
+    env,
     error::Error,
     hash::{Hash, Hasher},
-    io::{self},
+    io,
     process::Stdio,
     time::{self, Duration, SystemTime},
 };
@@ -112,6 +113,11 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
     debug!("Watching cmd now....");
     let c_stdout = c.stdout.take().unwrap();
     let c_stderr = c.stderr.take().unwrap();
+
+    let c_timeout: u64 = match env::var("R_CMD_TIMEOUT") {
+        Ok(c) => c.parse().unwrap_or(50),
+        Err(_) => 50,
+    };
     // recording start time, which is used to decide on timeout for the command
     let start_time = SystemTime::now();
 
@@ -136,7 +142,7 @@ async fn watch_cmd(mut c: Child, cmd_state: CmdState, script: String, cmd_hash: 
             SystemTime::now().duration_since(start_time).unwrap()
         );
         // timeout and kill the command if continues to run long
-        if SystemTime::now().duration_since(start_time).unwrap() > Duration::new(50, 0) {
+        if SystemTime::now().duration_since(start_time).unwrap() > Duration::from_secs(c_timeout) {
             match c.kill().await {
                 Ok(_) => {
                     warn!("Killing it....");
