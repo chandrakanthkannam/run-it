@@ -147,3 +147,68 @@ async fn getcmdstatus(
 async fn pitch() -> Response {
     "This is Runit application".into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app;
+    use crate::CmdState;
+    use axum::body;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::json;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+    use tower::{Service, ServiceExt};
+
+    #[tokio::test]
+    async fn echo() {
+        let r_body = json!(
+            {
+                "cmd": "echo",
+                "args": "Hello from Run-It"
+            }
+        );
+
+        let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
+        let mut app = app(cmd_state).into_service();
+
+        // Submit cmd
+        let sub_cmd = Request::builder()
+            .uri("/api/submitcmd")
+            .header("Content-Type", "application/json")
+            .method("POST")
+            .body(Body::from(serde_json::to_string(&r_body).unwrap()))
+            .unwrap();
+        let c_req = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(sub_cmd)
+            .await
+            .unwrap();
+        assert_eq!(c_req.status(), StatusCode::OK);
+
+        let c_id = body::to_bytes(c_req.into_body(), usize::MAX).await.unwrap();
+
+        // Get cmd status
+        let cmd_id = Request::builder()
+            .uri(format!(
+                "/api/getcmdstatus/{}",
+                String::from_utf8(c_id.to_vec()).unwrap()
+            ))
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let c_res = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(cmd_id)
+            .await
+            .unwrap();
+        assert_eq!(c_res.status(), StatusCode::OK);
+
+        let c_output = body::to_bytes(c_res.into_body(), usize::MAX).await.unwrap();
+        println!("{}", String::from_utf8(c_output.to_vec()).unwrap());
+    }
+}
