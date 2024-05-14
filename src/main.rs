@@ -40,10 +40,10 @@ async fn main() {
         Ok(c) => c.parse().unwrap_or(48786),
         Err(_) => 48786,
     };
-    let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), port);
+    let addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
-    info!("Listening on {}", addr);
+    info!("Listening on {}", port);
     axum::serve(listener, app(cmd_state.clone())).await.unwrap();
 }
 
