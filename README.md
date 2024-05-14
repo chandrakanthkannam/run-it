@@ -12,6 +12,10 @@ Run commands on host machine via http request.
 - Logging/Tracing is implemented to track the command flow
 - Live commands outputs are also captured, a configurable timeout setting for long running commands
 
+## DEMO
+
+https://github.com/chandrakanthkannam/run-it/assets/49658217/c6e55c75-6eeb-4a94-9786-6dace5cf2404
+
 ## TODO
 
 - Valid unit tests
