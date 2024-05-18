@@ -79,3 +79,8 @@ https://github.com/chandrakanthkannam/run-it/assets/49658217/c6e55c75-6eeb-4a94-
 
 - Valid unit tests
 - Ability to upload a script and run it
+- external datastore
+- server/clinet arch
+  - server will have an UI
+  - server can not accept commands via api
+  - client may or may not an ui module
