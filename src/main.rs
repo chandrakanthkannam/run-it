@@ -42,16 +42,17 @@ async fn main() {
     };
     let addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
     info!("Listening on {}", port);
-    axum::serve(listener, app(cmd_state.clone())).await.unwrap();
+    axum::serve(listener, app()).await.unwrap();
 }
 
-fn app(cmd_state: CmdState) -> Router {
+fn app() -> Router {
+    let cmd_state: CmdState = Arc::new(Mutex::new(HashMap::new()));
     Router::new()
         .route("/", get(pitch))
         .route("/api/submitcmd", post(submitcmd))
         .route("/api/getcmdstatus/:cmd_id", get(getcmdstatus))
+        .route("/api/submitfile", post(submitfile))
         .with_state(cmd_state.clone())
 }
 
@@ -142,6 +143,10 @@ async fn getcmdstatus(
             Json(CmdResponse::empty())
         }
     }
+}
+
+async fn submitfile(State(state): State<CmdState>) -> Response {
+    todo!()
 }
 
 async fn pitch() -> Response {
