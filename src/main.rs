@@ -73,7 +73,7 @@ struct GetCmdStatus {
 
 #[derive(serde::Deserialize, Debug)]
 struct Nl2Cmd {
-    nl2cmd: String
+    nl2cmd: String,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -153,19 +153,15 @@ async fn submitcmd(
     }
 }
 
-async fn nl2cmd(
-    State(state): State<CmdState>,
-    JsonPayload(req): JsonPayload<Nl2Cmd>,
-) -> Response {
+async fn nl2cmd(State(state): State<CmdState>, JsonPayload(req): JsonPayload<Nl2Cmd>) -> Response {
     let nl2cmd_txt = req.nl2cmd;
-    let ai_url = env::var("AI_URL").unwrap_or_else(|_| "http://localhost:3400/nl2CmdFlow".to_string());
+    let ai_url =
+        env::var("AI_URL").unwrap_or_else(|_| "http://localhost:3400/nl2CmdFlow".to_string());
     info!(method = "POST", nl2cmd_txt, ai_url);
-    
+
     // AI request data
-    let nl2cmd_req = Nl2CmdRequest{
-        data: Nl2CmdData { 
-            nl2cmd: nl2cmd_txt,
-        },
+    let nl2cmd_req = Nl2CmdRequest {
+        data: Nl2CmdData { nl2cmd: nl2cmd_txt },
     };
     // Make AI request
     let client = Client::new();
@@ -181,12 +177,20 @@ async fn nl2cmd(
                 Ok(ai_res) => {
                     info!("AI Response: {:?}", ai_res);
                     if ai_res.result.runnable {
-                        let submit_cmd = SubmitCmd {
-                            cmd: ai_res.result.cmd.clone(),
-                            args: None,
-                            is_shell: Some(true),
+                        let res_cmd = ai_res.result.cmd.clone();
+                        let cmd_parts: Vec<&str> = res_cmd.split_whitespace().collect();
+                        if cmd_parts.is_empty() {
+                            return (StatusCode::BAD_REQUEST, "Empty command").into_response();
+                        }
+
+                        let cmd = cmd_parts[0].to_string();
+                        let args = if cmd_parts.len() > 1 {
+                            Some(cmd_parts[1..].join(" "))
+                        } else {
+                            None
                         };
-                        match backend::init(submit_cmd.cmd, submit_cmd.args, submit_cmd.is_shell.unwrap_or(false), state).await {
+                        info!("Executing - cmd: {}, args: {:?}", cmd, args);
+                        match backend::init(cmd, args, false, state).await {
                             Ok(r) => r.to_string().into_response(),
                             Err(err) => err.to_string().into_response(),
                         }
@@ -194,19 +198,26 @@ async fn nl2cmd(
                         // Command is not runnable, return the message
                         (StatusCode::BAD_REQUEST, ai_res.result.cmd).into_response()
                     }
-                        
                 }
                 Err(e) => {
                     warn!("Failed to parse AI response: {}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse AI response: {}", e)).into_response()
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to parse AI response: {}", e),
+                    )
+                        .into_response()
                 }
             }
         }
         Err(e) => {
             warn!("Failed to call AI endpoint: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to call AI endpoint: {}", e)).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to call AI endpoint: {}", e),
+            )
+                .into_response()
         }
-    }    
+    }
 }
 
 async fn getcmdstatus(

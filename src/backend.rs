@@ -38,7 +38,7 @@ impl Cmd {
     }
     fn runit_with_args(&self, args: String) -> io::Result<Child> {
         Command::new(&self.cmd)
-            .arg(args)
+            .args(args.split_whitespace())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

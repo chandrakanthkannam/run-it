@@ -6,8 +6,10 @@ Run commands on host machine via http request.
 
 - Core feature is, to run a command on the host and command is submitted via a `http` request
 - Application records the commands its running
-- Couple of APIs are implemented
+- AI-powered natural language to command conversion via sidecar microservice
+- Multiple APIs are implemented:
   - `/api/submitcmd` -> to submit a command via `POST` method
+  - `/api/nl2cmd` -> to convert natural language to commands using AI via `POST` method
   - `/api/getcmdstatus/:cmd_id` -> to get status of the command, `cmd_id` would be the response of the `POST` request
 - Logging/Tracing is implemented to track the command flow
 - Live commands outputs are also captured, a configurable timeout setting for long running commands
@@ -18,6 +20,7 @@ Run commands on host machine via http request.
   - `RUST_LOG`: determine log level, Default is INFO.
   - `R_CMD_TIMEOUT`: Time out value in sec, only numerics, example: 100 for 100sec timeout, Default is 50
   - `RUN_IT_PORT`: port number to listen on, Default is 48786
+  - `AI_URL`: URL for the nl2cmd AI sidecar service, Default is http://localhost:3400/nl2CmdFlow
 
 ## DEMO
 
@@ -74,6 +77,49 @@ https://github.com/chandrakanthkannam/run-it/assets/49658217/c6e55c75-6eeb-4a94-
     }
     ```
     If the CMD_ID is not found an empty output is returned otherwise it will have the state and output at that point of time, i mean if the cmd is still active it would return that point in time output and state would be `in-progress`
+
+### Natural Language to Command (nl2cmd)
+
+- Service provides an AI-powered API to convert natural language descriptions into executable commands via `/api/nl2cmd` using a `POST` request with data in json format, requires header `'Content-Type: application/json'`
+
+  - **Sidecar Architecture**: This feature uses a microservices sidecar pattern where:
+    - The main Rust application (`run-it`) handles command execution
+    - A separate Go-based AI service (`nl2cmd`) handles natural language processing using Claude AI
+    - The services communicate via HTTP, allowing independent scaling and deployment
+    - The AI service can be updated or replaced without affecting the core application
+    - This separation keeps AI dependencies isolated from the core command execution logic
+
+  - data has the following key:
+
+  ```json
+  {
+    "nl2cmd": string<required>
+  }
+  ```
+
+  - nl2cmd - natural language description of the command you want to run, string type
+
+  - **How it works**:
+    1. User sends natural language request to `/api/nl2cmd`
+    2. Rust app forwards request to AI sidecar service (Go + Claude AI)
+    3. AI analyzes the request and generates appropriate command with safety checks
+    4. If command is safe and valid, Rust app executes it automatically
+    5. Response includes command ID for tracking via `/api/getcmdstatus`
+
+  - examples:
+    - `curl http://<IP_ADDRESS>:48786/api/nl2cmd -X POST -H 'Content-Type: application/json' -d '{"nl2cmd": "list all files"}'`
+      - Converts "list all files" to `ls -la` and executes it, responds with command ID
+    - `curl http://<IP_ADDRESS>:48786/api/nl2cmd -X POST -H 'Content-Type: application/json' -d '{"nl2cmd": "show disk usage"}'`
+      - Converts to `df -h` and executes, responds with command ID to check status
+    - `curl http://<IP_ADDRESS>:48786/api/nl2cmd -X POST -H 'Content-Type: application/json' -d '{"nl2cmd": "delete all files"}'`
+      - AI detects destructive command and blocks it, returns error with status 400
+    - `curl http://<IP_ADDRESS>:48786/api/nl2cmd -X POST -H 'Content-Type: application/json' -d '{"nl2cmd": "invalid nonsense text"}'`
+      - AI detects invalid input and returns error message with status 400
+
+  - **Prerequisites for nl2cmd**:
+    - The nl2cmd AI sidecar service must be running (see `nl2cmd/README.md`)
+    - Set `CLAUDE_API_KEY` environment variable in the sidecar service
+    - Optionally configure `AI_URL` to point to your sidecar instance (default: http://localhost:3400/nl2CmdFlow)
 
 ## TODO
 
