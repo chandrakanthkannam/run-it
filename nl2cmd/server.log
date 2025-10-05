@@ -1,2 +1,0 @@
-2025/10/04 00:40:16 ERROR request end reqID=1 err="failed to create completion: POST \"https://api.anthropic.com/v1/chat/completions\": 401 Unauthorized {\"code\":\"authentication_error\",\"message\":\"Invalid Anthropic API Key\",\"type\":\"invalid_request_error\",\"param\":null}"
-signal: killed
