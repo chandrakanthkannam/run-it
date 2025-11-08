@@ -81,6 +81,9 @@ https://github.com/chandrakanthkannam/run-it/assets/49658217/c6e55c75-6eeb-4a94-
 ### Natural Language to Command (nl2cmd)
 
 - Service provides an AI-powered API to convert natural language descriptions into executable commands via `/api/nl2cmd` using a `POST` request with data in json format, requires header `'Content-Type: application/json'`
+- Demo:
+  
+  https://github.com/user-attachments/assets/46044f29-f922-40a6-b432-bac74dc0509b
 
   - **Sidecar Architecture**: This feature uses a microservices sidecar pattern where:
     - The main Rust application (`run-it`) handles command execution
